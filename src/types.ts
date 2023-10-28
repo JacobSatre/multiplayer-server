@@ -1,4 +1,4 @@
-export type MoveDirections =
+export type MoveDirection =
   | "up"
   | "down"
   | "left"
@@ -9,17 +9,24 @@ export type MoveDirections =
   | "down-left"
   | "none";
 
-export type MoveMessage = {
+export type MoveInputMessage = {
   type: "move";
-  direction: MoveDirections;
-  mouseCoordinates: Coordinates;
+  direction: MoveDirection;
 };
 
-export type ShootMessage = {
+export type MouseMoveInputMessage = {
+  type: "mousemove";
+  coordinates: Coordinates;
+};
+
+export type ShootInputMessage = {
   type: "shoot";
 };
 
-export type Message = MoveMessage | ShootMessage;
+export type Message =
+  | MoveInputMessage
+  | MouseMoveInputMessage
+  | ShootInputMessage;
 
 export type Coordinates = {
   x: number;
@@ -28,6 +35,7 @@ export type Coordinates = {
 
 export type User = {
   id: string;
+  direction: MoveDirection;
   coordinates: Coordinates;
   mouseCoordinates: Coordinates;
   color: string;
@@ -39,6 +47,11 @@ export type Entity = {
   color: string;
 };
 
+export type Environment = {
+  width: 3840;
+  height: 3840;
+};
+
 export type State = {
   users: {
     [key: string]: User;
@@ -46,4 +59,5 @@ export type State = {
   entities: {
     [key: string]: Entity;
   };
+  environment: Environment;
 };

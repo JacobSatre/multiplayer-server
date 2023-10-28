@@ -1,7 +1,13 @@
 import express from "express";
 import { WebSocket, WebSocketServer } from "ws";
 import { v4 as uuid } from "uuid";
-import { Message, MoveMessage, State } from "./types";
+import {
+  Message,
+  MouseMoveInputMessage,
+  MoveInputMessage,
+  State,
+  User,
+} from "./types";
 
 const port = Number(process.env.PORT) || 3000;
 const host = process.env.HOST || "localhost";
@@ -12,53 +18,97 @@ const server = express()
 
 const wss = new WebSocketServer({ server });
 
+const playerWidth = 20;
+const playerHeight = 20;
+
 let state: State = {
   users: {},
   entities: {},
+  environment: {
+    width: 3840,
+    height: 3840,
+  },
 };
 
-wss.clients;
-
-function handleMove(id: string, message: MoveMessage) {
-  const direction = message.direction;
-  const mouseCoordinates = message.mouseCoordinates;
+function handleMove(user: User) {
+  console.log(user.direction);
+  const direction = user.direction;
+  const coordinates = state.users[user.id].coordinates;
   const speed = 40;
 
-  state.users[id].mouseCoordinates = mouseCoordinates;
+  const maxHeight = state.environment.height - playerWidth;
+  const maxWidth = state.environment.width - playerHeight;
+
+  function moveUp() {
+    coordinates.y = coordinates.y - speed < 0 ? 0 : coordinates.y - speed;
+  }
+
+  function moveDown() {
+    coordinates.y =
+      coordinates.y + speed > maxHeight ? maxHeight : coordinates.y + speed;
+  }
+
+  function moveLeft() {
+    coordinates.x = coordinates.x - speed < 0 ? 0 : coordinates.x - speed;
+  }
+
+  function moveRight() {
+    coordinates.x =
+      coordinates.x + speed > maxWidth ? maxWidth : coordinates.x + speed;
+  }
 
   switch (direction) {
     case "up":
-      state.users[id].coordinates.y -= speed;
+      moveUp();
       break;
     case "down":
-      state.users[id].coordinates.y += speed;
+      moveDown();
       break;
     case "right":
-      state.users[id].coordinates.x += speed;
+      moveRight();
       break;
     case "left":
-      state.users[id].coordinates.x -= speed;
+      moveLeft();
       break;
     case "up-right":
-      state.users[id].coordinates.y -= speed;
-      state.users[id].coordinates.x += speed;
+      moveUp();
+      moveRight();
       break;
     case "up-left":
-      state.users[id].coordinates.y -= speed;
-      state.users[id].coordinates.x -= speed;
+      moveUp();
+      moveLeft();
       break;
     case "down-right":
-      state.users[id].coordinates.y += speed;
-      state.users[id].coordinates.x += speed;
+      moveDown();
+      moveRight();
       break;
     case "down-left":
-      state.users[id].coordinates.y += speed;
-      state.users[id].coordinates.x -= speed;
+      moveDown();
+      moveLeft();
       break;
   }
 }
 
-function handleShoot(id: string) {
+//game clock
+setInterval(() => {
+  if (state.users) {
+    Object.values(state.users).forEach((user) => {
+      handleMove(user);
+    });
+  }
+}, 60);
+
+wss.clients;
+
+function handleMoveInput(id: string, message: MoveInputMessage) {
+  state.users[id].direction = message.direction;
+}
+
+function handleMouseMoveInput(id: string, message: MouseMoveInputMessage) {
+  state.users[id].mouseCoordinates = message.coordinates;
+}
+
+function handleShootInput(id: string) {
   const userCoordinates = state.users[id].coordinates;
   const userMouseCoordinates = state.users[id].mouseCoordinates;
   const userColor = state.users[id].color;
@@ -76,25 +126,6 @@ function handleShoot(id: string) {
   if (dx < 0 && dy > 0) {
     angle += Math.PI;
   }
-
-  /*if (dx < 0 && dy > 0) {
-    angle += Math.PI / 2; // add 90
-  }
-
-  if (dx < 0 && dy < 0) {
-    angle += Math.PI; // add 180
-  }
-
-  if (dx > 0 && dy < 0) {
-    angle += (3 * Math.PI) / 2; // 270
-  }*/
-
-  function radians_to_degrees(radians: number) {
-    var pi = Math.PI;
-    return radians * (180 / pi);
-  }
-
-  console.log(`dy = ${dy}, dx = ${dx}. degrees: ${radians_to_degrees(angle)}`);
 
   let entityId = uuid();
 
@@ -115,6 +146,20 @@ function handleShoot(id: string) {
   }, 3000);
 }
 
+function startClock(ws: WebSocket, id: string) {
+  return setInterval(() => {
+    if (ws && state) {
+      const packet = {
+        me: state.users[id],
+        users: Object.values(state.users).filter((user) => user.id !== id),
+        entities: Object.values(state.entities),
+        environment: state.environment,
+      };
+      ws.send(JSON.stringify(packet));
+    }
+  }, 50);
+}
+
 wss.on("connection", (ws: WebSocket) => {
   let id = uuid();
   let color = "#" + Math.floor(Math.random() * 16777215).toString(16);
@@ -123,18 +168,24 @@ wss.on("connection", (ws: WebSocket) => {
     color,
     coordinates: { x: 0, y: 0 },
     mouseCoordinates: { x: 0, y: 0 },
+    direction: "none",
   };
+
+  let interval = startClock(ws, id);
 
   ws.on("close", () => {
     delete state.users[id];
+    clearInterval(interval);
   });
   ws.on("message", (event) => {
     const message: Message = JSON.parse(event.toString());
 
     if (message.type === "move") {
-      handleMove(id, message);
+      handleMoveInput(id, message);
+    } else if (message.type === "mousemove") {
+      handleMouseMoveInput(id, message);
     } else if (message.type === "shoot") {
-      handleShoot(id);
+      handleShootInput(id);
     }
   });
 });
@@ -144,20 +195,3 @@ let test = {
   direction: "none",
   mouseCoordinates: { x: 0, y: 0 },
 };
-
-setInterval(() => {
-  if (wss.clients.size && state) {
-    wss.clients.forEach((client) => {
-      const packet = {
-        users: JSON.stringify(Object.values(state.users)),
-        entities: JSON.stringify(Object.values(state.entities)),
-      };
-      client.send(
-        JSON.stringify({
-          users: Object.values(state.users),
-          entities: Object.values(state.entities),
-        })
-      );
-    });
-  }
-}, 60);
